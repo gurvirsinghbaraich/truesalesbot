@@ -5,23 +5,34 @@ import express from "express";
 import { config } from "dotenv";
 import { readFileSync } from "fs";
 import { prismaClient } from "@repo/database";
-import { OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
+import { OpenAIEmbeddings, ChatOpenAI, OpenAI } from "@langchain/openai";
 import { systemPrompt } from "./lib/systemPrompt";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { Document } from "@langchain/core/documents";
 import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
-import { LanguageModelLike } from "@langchain/core/language_models/base";
-import { PromptTemplate } from "@langchain/core/prompts";
-import { StructuredOutputParser } from "@langchain/core/output_parsers";
+import { formatDocumentsAsString } from "langchain/util/document";
+import {
+  ChatPromptTemplate,
+  MessagesPlaceholder,
+  PromptTemplate,
+} from "@langchain/core/prompts";
+import {
+  StringOutputParser,
+  StructuredOutputParser,
+} from "@langchain/core/output_parsers";
+import {
+  RunnablePassthrough,
+  RunnableSequence,
+} from "@langchain/core/runnables";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
 
 if (process.env.NODE_ENV !== "production") {
   config();
 }
 
 const openai = new ChatOpenAI({
-  model: "gpt-4o",
+  model: "gpt-3.5-turbo",
   maxTokens: 150,
   streaming: true,
   streamUsage: true,
@@ -30,13 +41,6 @@ const openai = new ChatOpenAI({
   frequencyPenalty: 0,
   apiKey: process.env.OPENAI_SECRET_KEY,
 });
-
-const parserSchema = z.object({
-  response: z.string(),
-  q: z.array(z.string()).optional(),
-});
-
-const parser = StructuredOutputParser.fromZodSchema(parserSchema);
 
 const application = express();
 
@@ -154,21 +158,61 @@ application.post("/assistant/:botId", async function (request, response) {
     );
 
     const retriever = vectorStore.asRetriever();
-    const ragChain = await createStuffDocumentsChain({
-      llm: openai,
-      prompt: new PromptTemplate({
-        template: systemPrompt({
-          name: assistant.title,
-        }),
-        inputVariables: ["context", "question"],
+
+    const conversationalChainSystemPrompt =
+      `You are an assistant for question-answering tasks.
+    Use the following pieces of retrieved context to answer the question.
+    If you don't know the answer, just say that you don't know.
+    Use three sentences maximum and keep the answer concise.
+    
+    {context}`.trim();
+
+    const conversationalChainPromptTemplate = ChatPromptTemplate.fromMessages([
+      ["system", conversationalChainSystemPrompt],
+      ["system", systemPrompt({ name: assistant.title })],
+      new MessagesPlaceholder("history"),
+      ["human", "{question}"],
+    ]);
+
+    const conversationalChain = conversationalChainPromptTemplate
+      .pipe(openai)
+      .pipe(new StringOutputParser());
+
+    const contextualizedQuestion = function (input: Record<string, unknown>) {
+      if ("history" in input) {
+        return conversationalChain;
+      }
+
+      return input.question;
+    };
+
+    const ragChain = RunnableSequence.from([
+      RunnablePassthrough.assign({
+        context: (input: Record<string, unknown>) => {
+          return contextualizedQuestion(input);
+        },
       }),
-    });
+      conversationalChainPromptTemplate,
+      openai,
+    ]);
 
     const question =
       request.body.messages[request.body.messages.length - 1].content;
 
     const completion = await ragChain.stream({
       question: question,
+      history: request.body.messages
+        .slice(0, request.body.messages.length)
+        .map(
+          ({
+            role,
+            content,
+          }: {
+            role: "user" | "assistant";
+            content: string;
+          }) =>
+            role == "user" ? new HumanMessage(content) : new AIMessage(content)
+        ),
       context: await retriever.invoke(question),
     });
 
@@ -178,7 +222,7 @@ application.post("/assistant/:botId", async function (request, response) {
 
     for await (const chunk of completion) {
       if (chunk) {
-        response.write(chunk);
+        response.write(chunk.content as string);
       }
     }
 

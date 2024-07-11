@@ -59,6 +59,7 @@ function loadAssistantStyles(iframeDoc) {
     
     .assistant-ui-question:disabled {
       opacity: 0.8;
+      cursor: not-allowed;
     }
     
     .assistant-ui-question {
@@ -155,6 +156,10 @@ function loadAssistantStyles(iframeDoc) {
       padding: 12px 16px;
       border-radius: 10px 10px 0 10px;
       background: var(--assistant-ui-accent-color);
+    }
+
+    .assistant-ui .message.outgoing {
+      font-size: 13.3px;
     }
 
     .assistant-ui .message.incoming {
@@ -265,12 +270,12 @@ async function sendMessage(
   userMessageElement.innerHTML = `
     <p class="message outgoing">${messageContent}</p>
   `;
+  // Append user message to messages container
+  messagesContainer.appendChild(userMessageElement);
+
   userMessageElement.scrollIntoView({
     behavior: "smooth",
   });
-
-  // Append user message to messages container
-  messagesContainer.appendChild(userMessageElement);
 
   try {
     const assistantMessageId = generateUid();
@@ -285,9 +290,12 @@ async function sendMessage(
       </div>
       <div class="assistant-ui-questions"></div>
     `;
-
     // Append thinking message to messages container
     messagesContainer.appendChild(thinkingMessageElement);
+
+    thinkingMessageElement.scrollIntoView({
+      behavior: "smooth",
+    });
 
     const request = await fetch(`${botApiEndpoint}/${botId}`, {
       method: "POST",
