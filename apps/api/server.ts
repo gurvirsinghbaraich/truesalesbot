@@ -1,12 +1,20 @@
 import cors from "cors";
+import { z } from "zod";
 import path from "path";
 import express from "express";
 import { config } from "dotenv";
-import { prismaClient } from "@repo/database";
-import { systemPrompt } from "./lib/systemPrompt";
 import { readFileSync } from "fs";
-import { ChatOpenAI } from "@langchain/openai";
+import { prismaClient } from "@repo/database";
+import { OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
+import { systemPrompt } from "./lib/systemPrompt";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import { Document } from "@langchain/core/documents";
+import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
+import { LanguageModelLike } from "@langchain/core/language_models/base";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { StructuredOutputParser } from "@langchain/core/output_parsers";
 
 if (process.env.NODE_ENV !== "production") {
   config();
@@ -16,11 +24,19 @@ const openai = new ChatOpenAI({
   model: "gpt-4o",
   maxTokens: 150,
   streaming: true,
+  streamUsage: true,
   presencePenalty: 0,
   temperature: 0.5,
   frequencyPenalty: 0,
   apiKey: process.env.OPENAI_SECRET_KEY,
 });
+
+const parserSchema = z.object({
+  response: z.string(),
+  q: z.array(z.string()).optional(),
+});
+
+const parser = StructuredOutputParser.fromZodSchema(parserSchema);
 
 const application = express();
 
@@ -109,28 +125,52 @@ application.post("/assistant/:botId", async function (request, response) {
       });
     }
 
-    const completion = await openai.stream(
-      [
-        new SystemMessage(
-          systemPrompt({
-            name: assistant.title,
-            businessContext: assistant.Context[0]?.context,
-            additionalInformation: assistant.Context[0]?.additional,
-          })
-        ),
-        ...request.body.messages
-          .slice(0, request.body.messages.length)
-          .map(({ content }: { content: string }) => new HumanMessage(content)),
-        new HumanMessage(
-          `json response must contain a response field with a string value and additional click to ask follow up questions that customer would ask on given response (q) optional field as array. ${request.body.messages[request.body.messages.length - 1].content}`
-        ),
-      ],
-      {
-        response_format: {
-          type: "json_object",
+    const splitter = new RecursiveCharacterTextSplitter({
+      chunkSize: 400,
+      chunkOverlap: 100,
+    });
+
+    const splits = await splitter.splitDocuments([
+      new Document({
+        pageContent: assistant.Context[0].context,
+        metadata: {
+          source: "business-context",
         },
-      }
+      }),
+
+      new Document({
+        pageContent: assistant.Context[0].additional,
+        metadata: {
+          source: "additional-information",
+        },
+      }),
+    ]);
+
+    const vectorStore = await MemoryVectorStore.fromDocuments(
+      splits,
+      new OpenAIEmbeddings({
+        apiKey: process.env.OPENAI_SECRET_KEY,
+      })
     );
+
+    const retriever = vectorStore.asRetriever();
+    const ragChain = await createStuffDocumentsChain({
+      llm: openai,
+      prompt: new PromptTemplate({
+        template: systemPrompt({
+          name: assistant.title,
+        }),
+        inputVariables: ["context", "question"],
+      }),
+    });
+
+    const question =
+      request.body.messages[request.body.messages.length - 1].content;
+
+    const completion = await ragChain.stream({
+      question: question,
+      context: await retriever.invoke(question),
+    });
 
     response.setHeader("Content-Type", "text/plain");
     response.setHeader("Transfer-Encoding", "chunked");
@@ -138,7 +178,7 @@ application.post("/assistant/:botId", async function (request, response) {
 
     for await (const chunk of completion) {
       if (chunk) {
-        response.write(chunk.content);
+        response.write(chunk);
       }
     }
 

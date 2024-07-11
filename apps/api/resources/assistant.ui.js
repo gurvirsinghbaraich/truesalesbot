@@ -265,6 +265,9 @@ async function sendMessage(
   userMessageElement.innerHTML = `
     <p class="message outgoing">${messageContent}</p>
   `;
+  userMessageElement.scrollIntoView({
+    behavior: "smooth",
+  });
 
   // Append user message to messages container
   messagesContainer.appendChild(userMessageElement);
