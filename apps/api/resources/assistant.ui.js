@@ -352,6 +352,10 @@ async function sendMessage(
       thinkingMessageElement.querySelector("p").innerHTML = marked.parse(
         assistantMessageParsed
       );
+
+      thinkingMessageElement.scrollIntoView({
+        behavior: "smooth",
+      });
     }
   } catch (error) {
     console.error(error?.message);

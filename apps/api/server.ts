@@ -1,17 +1,24 @@
 import cors from "cors";
-import { OpenAI } from "openai";
 import path from "path";
 import express from "express";
 import { config } from "dotenv";
 import { prismaClient } from "@repo/database";
 import { systemPrompt } from "./lib/systemPrompt";
 import { readFileSync } from "fs";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
 if (process.env.NODE_ENV !== "production") {
   config();
 }
 
-const openai = new OpenAI({
+const openai = new ChatOpenAI({
+  model: "gpt-4o",
+  maxTokens: 150,
+  streaming: true,
+  presencePenalty: 0,
+  temperature: 0.5,
+  frequencyPenalty: 0,
   apiKey: process.env.OPENAI_SECRET_KEY,
 });
 
@@ -102,42 +109,36 @@ application.post("/assistant/:botId", async function (request, response) {
       });
     }
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt({
+    const completion = await openai.stream(
+      [
+        new SystemMessage(
+          systemPrompt({
             name: assistant.title,
             businessContext: assistant.Context[0]?.context,
             additionalInformation: assistant.Context[0]?.additional,
-          }),
-        },
-        ...request.body.messages.slice(0, request.body.messages.length),
-        {
-          ...request.body.messages[request.body.messages.length - 1],
-          content: `json response must contain a response field with a string value and additional click to ask follow up questions that customer would ask on given response (q) optional field as array. ${request.body.messages[request.body.messages.length - 1].content}`,
-        },
+          })
+        ),
+        ...request.body.messages
+          .slice(0, request.body.messages.length)
+          .map(({ content }: { content: string }) => new HumanMessage(content)),
+        new HumanMessage(
+          `json response must contain a response field with a string value and additional click to ask follow up questions that customer would ask on given response (q) optional field as array. ${request.body.messages[request.body.messages.length - 1].content}`
+        ),
       ],
-      temperature: 0.5,
-      max_tokens: 150,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-      stream: true,
-      response_format: {
-        type: "json_object",
-      },
-    });
+      {
+        response_format: {
+          type: "json_object",
+        },
+      }
+    );
 
     response.setHeader("Content-Type", "text/plain");
     response.setHeader("Transfer-Encoding", "chunked");
     response.flushHeaders();
 
     for await (const chunk of completion) {
-      const content = chunk.choices[0].delta.content;
-
-      if (content) {
-        response.write(content);
+      if (chunk) {
+        response.write(chunk.content);
       }
     }
 
