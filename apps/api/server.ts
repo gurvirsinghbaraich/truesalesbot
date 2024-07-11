@@ -22,6 +22,8 @@ import {
   StructuredOutputParser,
 } from "@langchain/core/output_parsers";
 import {
+  Runnable,
+  RunnableConfig,
   RunnablePassthrough,
   RunnableSequence,
 } from "@langchain/core/runnables";
@@ -159,16 +161,7 @@ application.post("/assistant/:botId", async function (request, response) {
 
     const retriever = vectorStore.asRetriever();
 
-    const conversationalChainSystemPrompt =
-      `You are an assistant for question-answering tasks.
-    Use the following pieces of retrieved context to answer the question.
-    If you don't know the answer, just say that you don't know.
-    Use three sentences maximum and keep the answer concise.
-    
-    {context}`.trim();
-
     const conversationalChainPromptTemplate = ChatPromptTemplate.fromMessages([
-      ["system", conversationalChainSystemPrompt],
       ["system", systemPrompt({ name: assistant.title })],
       new MessagesPlaceholder("history"),
       ["human", "{question}"],
@@ -189,7 +182,19 @@ application.post("/assistant/:botId", async function (request, response) {
     const ragChain = RunnableSequence.from([
       RunnablePassthrough.assign({
         context: (input: Record<string, unknown>) => {
-          return contextualizedQuestion(input);
+          if ("history" in input) {
+            return (
+              contextualizedQuestion(input) as Runnable<
+                any,
+                any,
+                RunnableConfig
+              >
+            )
+              .pipe(retriever)
+              .pipe(formatDocumentsAsString);
+          }
+
+          return "";
         },
       }),
       conversationalChainPromptTemplate,
