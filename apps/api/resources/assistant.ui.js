@@ -247,13 +247,11 @@ function generateUid() {
 async function sendMessage(
   messageContent,
   messagesContainer,
-  { botId, questions }
+  { botId, iframeDoc }
 ) {
-  if (Array.isArray(questions)) {
-    questions.map((question) => {
-      question.disabled = true;
-    });
-  }
+  [...iframeDoc.querySelectorAll(".assistant-ui-question")].map((question) => {
+    question.disabled = true;
+  });
 
   const messageId = generateUid();
 
@@ -353,7 +351,7 @@ async function sendMessage(
             question.onclick = () => {
               sendMessage(question.innerHTML, messagesContainer, {
                 botId,
-                questions,
+                iframeDoc,
               });
             };
           });
@@ -409,6 +407,7 @@ async function loadActions(botId, iframeDoc, iframe) {
     if (event.key === "Enter" && !event.shiftKey) {
       sendMessage(assistantMessageBox.value, assistantMessagesContainer, {
         botId,
+        iframeDoc,
       });
 
       assistantMessageBox.value = "";
@@ -418,12 +417,13 @@ async function loadActions(botId, iframeDoc, iframe) {
   assistantMessageBoxSendButton.addEventListener("click", () => {
     sendMessage(assistantMessageBox.value, assistantMessagesContainer, {
       botId,
+      iframeDoc,
     });
 
     assistantMessageBox.value = "";
   });
 
-  sendMessage("Hi", assistantMessagesContainer, { botId });
+  sendMessage("Hi", assistantMessagesContainer, { botId, iframeDoc });
 
   const messageId = messages[0].id;
   const messageElement = iframeDoc.querySelector(

@@ -24,6 +24,6 @@ NEVER USE CODE BLOCKS IN MARKDOWN FOR EXAMPLE: \`\`\`json
 \`\`\`
 
 YOU MUST BEGIN WITH AN OPENING CURLY BRACE AND MUST END WITH ENDING CURLY BRACE! ONLY GIVE ANSWER IN JSON FORMAT WITH STRICT 2 PROPERTIES (response and q).
-YOU MUST ANSWER IN THE FOLLOWING JSON FORMAT (A response field with a string value and additional 'click to ask follow-up questions' that customers would ask based on the given answer. The 'q' field is optional and should be an array of potential follow-up questions to further progress the conversation).
+YOU MUST ANSWER IN THE FOLLOWING JSON FORMAT (A response field with a string value and additional 'click to ask questions' that customers would ask the ${config.name} based on the given answer. The 'q' field is optional and should be an array of potential follow-up questions to further progress the conversation).
   `.trim();
 };
