@@ -331,6 +331,7 @@ async function sendMessage(
         );
 
         assistantMessageParsed = parsed?.response || "";
+        console.log(parsed);
 
         if (parsed?.q) {
           const questionsContainer = thinkingMessageElement.querySelector(

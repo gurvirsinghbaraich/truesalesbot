@@ -5,22 +5,17 @@ import express from "express";
 import { config } from "dotenv";
 import { readFileSync } from "fs";
 import { prismaClient } from "@repo/database";
-import { OpenAIEmbeddings, ChatOpenAI, OpenAI } from "@langchain/openai";
+import { OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
 import { systemPrompt } from "./lib/systemPrompt";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { Document } from "@langchain/core/documents";
-import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
 import { formatDocumentsAsString } from "langchain/util/document";
 import {
   ChatPromptTemplate,
   MessagesPlaceholder,
-  PromptTemplate,
 } from "@langchain/core/prompts";
-import {
-  StringOutputParser,
-  StructuredOutputParser,
-} from "@langchain/core/output_parsers";
+import { StringOutputParser } from "@langchain/core/output_parsers";
 import {
   Runnable,
   RunnableConfig,
@@ -47,20 +42,14 @@ const openai = new ChatOpenAI({
 const application = express();
 
 application.use(express.json());
-application.use(
-  cors({
-    origin: "*",
-    methods: ["GET"],
-  })
-);
+application.use(cors({ origin: "*", methods: ["GET"] }));
 
-application.get("/assistant.ui.js", async function (request, response) {
+application.get("/assistant.ui.js", async (request, response) => {
   const jsonrepairJsFilePath = path.join(
     __dirname,
     "resources",
     "jsonrepair.js"
   );
-
   const assistantUiJsFilePath = path.join(
     __dirname,
     "resources",
@@ -77,14 +66,12 @@ application.get("/assistant.ui.js", async function (request, response) {
   response.end();
 });
 
-application.get("/assistant/:botId", async function (request, response) {
+application.get("/assistant/:botId", async (request, response) => {
   const assistant = await prismaClient.assistant.findFirst({
-    where: {
-      id: request.params.botId,
-    },
+    where: { id: request.params.botId },
   });
 
-  return response.json({
+  response.json({
     name: assistant?.title,
     textColor: assistant?.textColor,
     accentColor: assistant?.accentColor,
@@ -92,153 +79,115 @@ application.get("/assistant/:botId", async function (request, response) {
   });
 });
 
-application.post("/assistant/:botId", async function (request, response) {
+application.post("/assistant/:botId", async (request, response) => {
   const referer = request.get("referer") || request.get("referrer");
 
-  if (referer) {
-    const botId = request.params.botId;
-    const requestUrl = new URL(referer);
-
-    if (
-      !botId.match(
-        /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
-      )
-    ) {
-      return response.status(400).json({
-        message: "Invalid botId format specified!",
-      });
-    }
-
-    const assistant = await prismaClient.assistant.findFirst({
-      where: {
-        id: botId,
-        Domain: {
-          every: {
-            name: requestUrl.host!,
-          },
-        },
-      },
-      include: {
-        Context: true,
-      },
-    });
-
-    if (!assistant) {
-      response.setHeader("Content-Type", "application/json");
-
-      return response.status(401).json({
-        message: "Unable to find the assistant with the provided botId!",
-      });
-    }
-
-    const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 400,
-      chunkOverlap: 100,
-    });
-
-    const splits = await splitter.splitDocuments([
-      new Document({
-        pageContent: assistant.Context[0].context,
-        metadata: {
-          source: "business-context",
-        },
-      }),
-
-      new Document({
-        pageContent: assistant.Context[0].additional,
-        metadata: {
-          source: "additional-information",
-        },
-      }),
-    ]);
-
-    const vectorStore = await MemoryVectorStore.fromDocuments(
-      splits,
-      new OpenAIEmbeddings({
-        apiKey: process.env.OPENAI_SECRET_KEY,
-      })
-    );
-
-    const retriever = vectorStore.asRetriever();
-
-    const conversationalChainPromptTemplate = ChatPromptTemplate.fromMessages([
-      ["system", systemPrompt({ name: assistant.title })],
-      new MessagesPlaceholder("history"),
-      ["human", "{question}"],
-    ]);
-
-    const conversationalChain = conversationalChainPromptTemplate
-      .pipe(openai)
-      .pipe(new StringOutputParser());
-
-    const contextualizedQuestion = function (input: Record<string, unknown>) {
-      if ("history" in input) {
-        return conversationalChain;
-      }
-
-      return input.question;
-    };
-
-    const ragChain = RunnableSequence.from([
-      RunnablePassthrough.assign({
-        context: (input: Record<string, unknown>) => {
-          if ("history" in input) {
-            return (
-              contextualizedQuestion(input) as Runnable<
-                any,
-                any,
-                RunnableConfig
-              >
-            )
-              .pipe(retriever)
-              .pipe(formatDocumentsAsString);
-          }
-
-          return "";
-        },
-      }),
-      conversationalChainPromptTemplate,
-      openai,
-    ]);
-
-    const question =
-      request.body.messages[request.body.messages.length - 1].content;
-
-    const completion = await ragChain.stream({
-      question: question,
-      history: request.body.messages
-        .slice(0, request.body.messages.length)
-        .map(
-          ({
-            role,
-            content,
-          }: {
-            role: "user" | "assistant";
-            content: string;
-          }) =>
-            role == "user" ? new HumanMessage(content) : new AIMessage(content)
-        ),
-      context: await retriever.invoke(question),
-    });
-
-    response.setHeader("Content-Type", "text/plain");
-    response.setHeader("Transfer-Encoding", "chunked");
-    response.flushHeaders();
-
-    for await (const chunk of completion) {
-      if (chunk) {
-        response.write(chunk.content as string);
-      }
-    }
-
-    return response.end();
+  if (!referer) {
+    return response
+      .status(400)
+      .json({ message: "Unable to validate the requesting domain!" });
   }
 
-  return response.status(400).json({
-    message: "Unable to validate the requesting domain!",
+  const botId = request.params.botId;
+  const requestUrl = new URL(referer);
+
+  if (
+    !botId.match(
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+    )
+  ) {
+    return response
+      .status(400)
+      .json({ message: "Invalid botId format specified!" });
+  }
+
+  const assistant = await prismaClient.assistant.findFirst({
+    where: {
+      id: botId,
+      Domain: { every: { name: requestUrl.host } },
+    },
+    include: { Context: true },
   });
+
+  if (!assistant) {
+    return response.status(401).json({
+      message: "Unable to find the assistant with the provided botId!",
+    });
+  }
+
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 400,
+    chunkOverlap: 100,
+  });
+  const splits = await splitter.splitDocuments([
+    new Document({
+      pageContent: assistant.Context[0].context,
+      metadata: { source: "business-context" },
+    }),
+    new Document({
+      pageContent: assistant.Context[0].additional,
+      metadata: { source: "additional-information" },
+    }),
+  ]);
+
+  const vectorStore = await MemoryVectorStore.fromDocuments(
+    splits,
+    new OpenAIEmbeddings({ apiKey: process.env.OPENAI_SECRET_KEY })
+  );
+  const retriever = vectorStore.asRetriever();
+
+  const conversationalChainPromptTemplate = ChatPromptTemplate.fromMessages([
+    ["system", systemPrompt({ name: assistant.title })],
+    new MessagesPlaceholder("history"),
+    ["human", "{question}"],
+  ]);
+
+  const conversationalChain = conversationalChainPromptTemplate
+    .pipe(openai)
+    .pipe(new StringOutputParser());
+
+  const contextualizedQuestion = (input: Record<string, unknown>) => {
+    return "history" in input ? conversationalChain : input.question;
+  };
+
+  const ragChain = RunnableSequence.from([
+    RunnablePassthrough.assign({
+      context: (input: Record<string, unknown>) => {
+        return "history" in input
+          ? (contextualizedQuestion(input) as typeof conversationalChain)
+              .pipe(retriever)
+              .pipe(formatDocumentsAsString)
+          : "";
+      },
+    }),
+    conversationalChainPromptTemplate,
+    openai,
+  ]);
+
+  const question =
+    request.body.messages[request.body.messages.length - 1].content;
+  const completion = await ragChain.stream({
+    question,
+    history: request.body.messages.map(
+      ({ role, content }: { role: "user" | "assistant"; content: string }) =>
+        role === "user" ? new HumanMessage(content) : new AIMessage(content)
+    ),
+    context: await retriever.invoke(question),
+  });
+
+  response.setHeader("Content-Type", "text/plain");
+  response.setHeader("Transfer-Encoding", "chunked");
+  response.flushHeaders();
+
+  for await (const chunk of completion) {
+    if (chunk) {
+      response.write(chunk.content as string);
+    }
+  }
+
+  response.end();
 });
 
-application.listen(process.env.PORT, function () {
-  console.log("Server running on PORT: " + process.env.PORT);
+application.listen(process.env.PORT, () => {
+  console.log(`Server running on PORT: ${process.env.PORT}`);
 });
