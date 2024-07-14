@@ -46,6 +46,24 @@ model Domain {
 
   assistantId String    @db.Uuid
   assistant   Assistant @relation(fields: [assistantId], references: [id])
+  signUpId    String    @db.Uuid
+  signUp      SignUps   @relation(fields: [signUpId], references: [id])
+}
+
+model SignUps {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String
+  firstName String?
+  lastName  String?
+  gender    String?
+  city      String?
+  zipCode   String?
+  region    String?
+  country   String?
+  provider  String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+  Domain    Domain[]
 }
 
 model Context {

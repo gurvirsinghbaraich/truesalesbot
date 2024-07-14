@@ -13,6 +13,7 @@
     "@langchain/core": "^0.2.15",
     "@langchain/openai": "^0.2.1",
     "@repo/database": "workspace:*",
+    "@zerobounce/zero-bounce-sdk": "^1.1.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

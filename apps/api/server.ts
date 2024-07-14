@@ -17,19 +17,18 @@ import {
 } from "@langchain/core/prompts";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import {
-  Runnable,
-  RunnableConfig,
   RunnablePassthrough,
   RunnableSequence,
 } from "@langchain/core/runnables";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { tool } from "@langchain/core/tools";
 
 if (process.env.NODE_ENV !== "production") {
   config();
 }
 
 const openai = new ChatOpenAI({
-  model: "gpt-3.5-turbo",
+  model: "gpt-4o",
   maxTokens: 150,
   streaming: true,
   streamUsage: true,
@@ -37,6 +36,30 @@ const openai = new ChatOpenAI({
   temperature: 0.5,
   frequencyPenalty: 0,
   apiKey: process.env.OPENAI_SECRET_KEY,
+});
+
+const storeEmailTool = tool(
+  async ({ email }) => {
+    console.log(email);
+
+    return JSON.stringify({
+      status: "success",
+    });
+  },
+  {
+    name: "store-email",
+    description:
+      "Stores the user's email in the database if provided during the conversation. Only accepts valid and non-temporary emails.",
+    schema: z.object({
+      email: z.string().email(),
+    }),
+  }
+);
+
+const languageModel = openai.bindTools([storeEmailTool]).bind({
+  response_format: {
+    type: "json_object",
+  },
 });
 
 const application = express();
@@ -119,15 +142,22 @@ application.post("/assistant/:botId", async (request, response) => {
     chunkSize: 400,
     chunkOverlap: 100,
   });
+
   const splits = await splitter.splitDocuments([
-    new Document({
-      pageContent: assistant.Context[0].context,
-      metadata: { source: "business-context" },
-    }),
-    new Document({
-      pageContent: assistant.Context[0].additional,
-      metadata: { source: "additional-information" },
-    }),
+    ...assistant.Context.map(
+      (context) =>
+        new Document({
+          pageContent: context.context,
+          metadata: { source: "business-information" },
+        })
+    ),
+    ...assistant.Context.map(
+      (context) =>
+        new Document({
+          pageContent: context.additional,
+          metadata: { source: "additional-information" },
+        })
+    ),
   ]);
 
   const vectorStore = await MemoryVectorStore.fromDocuments(
@@ -143,7 +173,7 @@ application.post("/assistant/:botId", async (request, response) => {
   ]);
 
   const conversationalChain = conversationalChainPromptTemplate
-    .pipe(openai)
+    .pipe(languageModel)
     .pipe(new StringOutputParser());
 
   const contextualizedQuestion = (input: Record<string, unknown>) => {
@@ -161,7 +191,7 @@ application.post("/assistant/:botId", async (request, response) => {
       },
     }),
     conversationalChainPromptTemplate,
-    openai,
+    languageModel,
   ]);
 
   const question =

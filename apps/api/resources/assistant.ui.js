@@ -320,6 +320,11 @@ async function sendMessage(
       const { done, value } = await reader.read();
 
       if (done) {
+        messages.push({
+          role: "assistant",
+          id: assistantMessageId,
+          content: assistantMessageParsed,
+        });
         break;
       }
 

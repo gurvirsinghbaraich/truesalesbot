@@ -29,6 +29,9 @@ importers:
       '@repo/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@zerobounce/zero-bounce-sdk':
+        specifier: ^1.1.2
+        version: 1.1.2
       cors:
         specifier: ^2.8.5
         version: 2.8.5
@@ -715,6 +718,9 @@ packages:
 
   '@ungap/structured-clone@1.2.0':
     resolution: {integrity: sha512-zuVdFrMJiuCDQUMCzQaD6KL28MjnqqN8XnAqiEq9PNm/hCPTSGfrXCOfwj1ow4LFb/tNymJPwsNbVePc1xFqrQ==}
+
+  '@zerobounce/zero-bounce-sdk@1.1.2':
+    resolution: {integrity: sha512-gpeRjecIiY9YjO7GH4DXcHLZ9v4ifxAnDASmTKzDrHmTFodlckp78/HDUBsKRQZppZ5UmEslExBF1U47UAi56g==}
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -3043,6 +3049,8 @@ snapshots:
       eslint-visitor-keys: 3.4.3
 
   '@ungap/structured-clone@1.2.0': {}
+
+  '@zerobounce/zero-bounce-sdk@1.1.2': {}
 
   abort-controller@3.0.0:
     dependencies:
