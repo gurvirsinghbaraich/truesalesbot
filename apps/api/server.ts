@@ -1,4 +1,7 @@
 import cors from "cors";
+import { concat } from "@langchain/core/utils/stream";
+import { OpenAIFunctionsAgentOutputParser } from "langchain/agents/openai/output_parser";
+import { AgentAction, AgentExecutor } from "langchain/agents";
 import { z } from "zod";
 import path from "path";
 import express from "express";
@@ -15,7 +18,6 @@ import {
   ChatPromptTemplate,
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
-import { StringOutputParser } from "@langchain/core/output_parsers";
 import {
   RunnablePassthrough,
   RunnableSequence,
@@ -42,9 +44,7 @@ const storeEmailTool = tool(
   async ({ email }) => {
     console.log(email);
 
-    return JSON.stringify({
-      status: "success",
-    });
+    return email;
   },
   {
     name: "store-email",
@@ -172,36 +172,38 @@ application.post("/assistant/:botId", async (request, response) => {
     ["human", "{question}"],
   ]);
 
-  const conversationalChain = conversationalChainPromptTemplate
-    .pipe(languageModel)
-    .pipe(new StringOutputParser());
-
-  const contextualizedQuestion = (input: Record<string, unknown>) => {
-    return "history" in input ? conversationalChain : input.question;
-  };
-
   const ragChain = RunnableSequence.from([
     RunnablePassthrough.assign({
-      context: (input: Record<string, unknown>) => {
-        return "history" in input
-          ? (contextualizedQuestion(input) as typeof conversationalChain)
-              .pipe(retriever)
-              .pipe(formatDocumentsAsString)
+      context: async (input: Record<string, unknown>) => {
+        const question = await input.question;
+        return question
+          ? retriever
+              .getRelevantDocuments(question as any)
+              .then(formatDocumentsAsString)
           : "";
       },
     }),
     conversationalChainPromptTemplate,
     languageModel,
+    new OpenAIFunctionsAgentOutputParser(),
   ]);
+
+  const agent = new AgentExecutor({
+    agent: ragChain,
+    tools: [storeEmailTool],
+  });
 
   const question =
     request.body.messages[request.body.messages.length - 1].content;
-  const completion = await ragChain.stream({
+
+  const completion = await agent.stream({
     question,
-    history: request.body.messages.map(
-      ({ role, content }: { role: "user" | "assistant"; content: string }) =>
-        role === "user" ? new HumanMessage(content) : new AIMessage(content)
-    ),
+    history: request.body.messages
+      .slice(0, request.body.messages.length - 1)
+      .map(
+        ({ role, content }: { role: "user" | "assistant"; content: string }) =>
+          role === "user" ? new HumanMessage(content) : new AIMessage(content)
+      ),
     context: await retriever.invoke(question),
   });
 
@@ -210,9 +212,8 @@ application.post("/assistant/:botId", async (request, response) => {
   response.flushHeaders();
 
   for await (const chunk of completion) {
-    if (chunk) {
-      response.write(chunk.content as string);
-    }
+    const agentChunk = chunk as { output: string };
+    response.write(agentChunk.output);
   }
 
   response.end();

@@ -334,6 +334,7 @@ async function sendMessage(
         const parsed = JSON.parse(
           JSONRepair.jsonrepair(assistantMessageContent.replace(/\n/g, ""))
         );
+        console.log(parsed);
 
         assistantMessageParsed = parsed?.response || "";
         console.log(parsed);
@@ -429,7 +430,11 @@ async function loadActions(botId, iframeDoc, iframe) {
     assistantMessageBox.value = "";
   });
 
-  sendMessage("Hi", assistantMessagesContainer, { botId, iframeDoc });
+  sendMessage(
+    ["Hi", "Hello"][Math.random() > 0.5 ? 1 : 0],
+    assistantMessagesContainer,
+    { botId, iframeDoc }
+  );
 
   const messageId = messages[0].id;
   const messageElement = iframeDoc.querySelector(
